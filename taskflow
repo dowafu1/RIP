@@ -1,0 +1,134 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$ROOT_DIR"
+
+if docker compose version >/dev/null 2>&1; then
+    compose() { docker compose "$@"; }
+elif command -v docker-compose >/dev/null 2>&1; then
+    compose() { docker-compose "$@"; }
+else
+    echo "Docker Compose не найден. Установите Docker Desktop или docker-compose." >&2
+    exit 1
+fi
+
+usage() {
+    cat <<'HELP'
+Taskflow — управление учебным проектом.
+
+Использование:
+  ./taskflow up            собрать и запустить стек в фоне
+  ./taskflow down          остановить контейнеры
+  ./taskflow status        показать состояние контейнеров
+  ./taskflow health        проверить API и фронтенд
+  ./taskflow logs [service]  смотреть логи (Ctrl+C только выходит из просмотра)
+  ./taskflow shell [service] открыть sh внутри контейнера (по умолчанию backend)
+  ./taskflow open          открыть приложение в браузере
+  ./taskflow reset         удалить данные PostgreSQL и пересоздать стек
+  ./taskflow help          показать эту справку
+
+Примеры:
+  ./taskflow up
+  ./taskflow logs backend
+  ./taskflow shell db
+HELP
+}
+
+wait_for_app() {
+    printf "Ожидаю готовность Taskflow"
+    attempt=0
+    while [ "$attempt" -lt 60 ]; do
+        if curl -fsS http://127.0.0.1:5173/healthz >/dev/null 2>&1; then
+            printf "\n"
+            echo "Taskflow:  http://localhost:5173"
+            echo "Swagger:   http://localhost:8000/docs"
+            echo "Логи:      ./taskflow logs"
+            echo "Остановка: ./taskflow down"
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        printf "."
+        sleep 1
+    done
+    printf "\n"
+    echo "Приложение не ответило за 60 секунд. Посмотрите логи: ./taskflow logs" >&2
+    return 1
+}
+
+start_stack() {
+    compose up -d --build
+    wait_for_app
+}
+
+check_http() {
+    label=$1
+    url=$2
+    if curl -fsS "$url" >/dev/null 2>&1; then
+        echo "$label: OK"
+    else
+        echo "$label: FAIL"
+        return 1
+    fi
+}
+
+command=${1:-help}
+[ "$#" -gt 0 ] && shift
+
+case "$command" in
+    up)
+        start_stack
+        ;;
+    down)
+        compose down
+        echo "Стек остановлен. Данные PostgreSQL сохранены."
+        ;;
+    status)
+        compose ps
+        ;;
+    health)
+        failed=0
+        check_http "frontend" "http://127.0.0.1:5173/healthz" || failed=1
+        check_http "backend " "http://127.0.0.1:8000/api/health" || failed=1
+        exit "$failed"
+        ;;
+    logs)
+        echo "Поток логов. Ctrl+C остановит только просмотр; контейнеры продолжат работать."
+        compose logs --follow --tail=100 "$@"
+        ;;
+    shell)
+        service=${1:-backend}
+        compose exec "$service" sh
+        ;;
+    open)
+        if command -v open >/dev/null 2>&1; then
+            open http://localhost:5173
+        elif command -v xdg-open >/dev/null 2>&1; then
+            xdg-open http://localhost:5173
+        else
+            echo "Откройте вручную: http://localhost:5173"
+        fi
+        ;;
+    reset)
+        printf "Удалить контейнеры и все данные PostgreSQL? [y/N] "
+        read -r answer
+        case "$answer" in
+            y|Y|yes|YES)
+                compose down -v
+                start_stack
+                ;;
+            *)
+                echo "Отменено."
+                ;;
+        esac
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "Неизвестная команда: $command" >&2
+        echo
+        usage
+        exit 1
+        ;;
+esac
