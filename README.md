@@ -1,12 +1,10 @@
 # Taskflow — Todo List с real-time синхронизацией
 
-Полноценное учебное клиент-серверное приложение: личные задачи, JWT-авторизация и мгновенное обновление списка через WebSocket во всех открытых вкладках пользователя.
+Полноценное клиент-серверное приложение: личные задачи, JWT-авторизация и мгновенное обновление списка через WebSocket во всех открытых вкладках пользователя.
 
 **Стек:** FastAPI · SQLAlchemy 2 (async) · PostgreSQL · Alembic · JWT · WebSocket · React 19 · Vite · Axios · Nginx · Docker Compose.
 
 ## Быстрый запуск
-
-Нужны Docker Engine/Desktop с Compose v2 и свободные порты `5173` и `8000`.
 
 ```bash
 cp .env.example .env
@@ -15,9 +13,7 @@ cp .env.example .env
 
 Откройте **http://localhost:5173**, зарегистрируйтесь и создайте первую задачу. Swagger доступен на **http://localhost:8000/docs**.
 
-`./taskflow up` собирает и запускает контейнеры **в фоне**, поэтому терминал не засыпает логами health-check’ов.
-
-Если пропустить `cp`, проект всё равно запустится с dev-значениями по умолчанию, но `JWT_SECRET_KEY` из `.env` использовать правильнее.
+`./taskflow up` собирает и запускает контейнеры в фоне.
 
 Остановка:
 
@@ -41,25 +37,6 @@ cp .env.example .env
 | `./taskflow down` | Останавливает контейнеры |
 | `./taskflow reset` | Удаляет volume с БД и пересоздаёт стек |
 
-Если CLI не нужен, те же действия доступны через Docker Compose напрямую. Главное отличие: `docker compose up` **прикрепляется к логам**, а `docker compose up -d` — нет.
-
-## Почему в консоли постоянно появляются сообщения
-
-Это не сообщения от приложения в чат, а stdout/stderr контейнеров, которые Docker Compose показывает в текущем терминале.
-
-- `Attaching to backend-1, db-1, frontend-1` — Compose подключился к логам трёх контейнеров. Пока терминал открыт, он печатает всё, что пишут процессы.
-- Частые `GET /api/health` и `GET /` — это **Docker healthcheck**. Compose проверяет, что backend и frontend живы. Теперь healthcheck’и не засоряют access-логи: у фронтенда есть отдельный `/healthz`, а backend-фильтр скрывает `/api/health`.
-- `database system is ready to accept connections`, `CREATE DATABASE`, `running bootstrap script` — одноразовая инициализация PostgreSQL при создании volume.
-- `checkpoint starting/complete` в `db-1` — штатная фоновая работа PostgreSQL, а не ошибка.
-- `connection open/closed` и `[accepted]` — подключения WebSocket к real-time каналу.
-
-Если не хотите видеть поток логов, запускайте `./taskflow up` или `docker compose up -d --build`. Логи можно посмотреть позже:
-
-```bash
-./taskflow logs
-./taskflow logs backend
-```
-
 `Ctrl+C` в `docker compose up` останавливает и сам стек. `Ctrl+C` в `./taskflow logs` останавливает только просмотр — контейнеры продолжают работать.
 
 ## Возможности
@@ -71,17 +48,6 @@ cp .env.example .env
 - Автоматическое переподключение WebSocket с экспоненциальной задержкой и повторной загрузкой состояния.
 - Валидация Pydantic, async SQLAlchemy, миграции Alembic.
 - Адаптивный интерфейс на чистом CSS без UI-библиотек.
-
-## Интерфейс
-
-<p align="center">
-  <img src="docs/screenshots/auth.png" width="49%" alt="Экран входа и регистрации">
-  <img src="docs/screenshots/tasks.png" width="49%" alt="Список задач с real-time статусом">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/mobile.png" width="260" alt="Мобильная версия">
-</p>
 
 ## Архитектура
 
@@ -213,17 +179,10 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Фронтенд (Vite проксирует `/api` и `/ws` на `http://127.0.0.1:8000`):
+Фронтенд:
 
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-## Технические ограничения учебного проекта
-
-- `ConnectionManager` хранит подключения в памяти, поэтому Uvicorn запускается с одним worker. Для нескольких инстансов нужен общий брокер — например, Redis Pub/Sub.
-- JWT хранится в `localStorage` для простоты. В production предпочтительнее httpOnly-cookie и CSRF-защита.
-- JWT для WebSocket передаётся в query-параметре, но health-check и query-строка `/ws` исключены из логов. Для production всё равно предпочтительнее короткоживущий одноразовый тикет или secure-cookie.
-- Нет rate limiting, подтверждения email и восстановления пароля — это осознанно оставлено за рамками учебного объёма.
